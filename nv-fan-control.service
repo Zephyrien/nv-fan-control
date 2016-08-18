@@ -1,0 +1,8 @@
+[Unit]
+Description=Nvidia GPU fan control
+
+[Service]
+ExecStart=/usr/bin/python -u /usr/local/bin/nv-fan-control.py
+
+[Install]
+WantedBy=graphical.target
