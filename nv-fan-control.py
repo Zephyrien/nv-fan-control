@@ -62,10 +62,6 @@ class NvidiaGpus():
         except ValueError:
             return(0)
 			
-    def __execute_nv_setting(self,arg):
-        """Launch nvidia-settings"""
-        return check_output(str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + " " + arg),stderr=STDOUT,universal_newlines=True).strip()
-
     def _temp(self):
         """Return GPU temperature"""
         cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + " -t -q [GPU:"+str(self.idx)+ "]/GPUCoreTemp")       
