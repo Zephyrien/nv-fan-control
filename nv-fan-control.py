@@ -55,31 +55,39 @@ class NvidiaGpus():
         speed=self._get_fan_speed()
         if speed > SPEED_MIN: self._set_fan_speed(speed - adj)
         return(self)
-
+		
+    def __toint(self,value):
+        try:
+            return(int(value))
+        except ValueError:
+            return(0)
+			
     def __execute_nv_setting(self,arg):
         """Launch nvidia-settings"""
         return check_output(str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + " " + arg),stderr=STDOUT,universal_newlines=True).strip()
 
     def _temp(self):
         """Return GPU temperature"""
-        tempe=self.__execute_nv_setting("-t -q [GPU:"+str(self.idx)+ "]/GPUCoreTemp")
-        return(int(tempe))
+        cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + " -t -q [GPU:"+str(self.idx)+ "]/GPUCoreTemp")       
+        return(self.__toint(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip()))
 
     def _get_fan_speed(self):
         """Get fan speed"""
-        speed=self.__execute_nv_setting("-t -q [fan:"+str(self.idx)+ "]/GPUCurrentFanSpeed")
-        return(int(speed))
+        cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + "-t -q [fan:"+str(self.idx)+ "]/GPUCurrentFanSpeed")        
+        return(self.__toint(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip()))
 
     def _set_fan_speed(self,speed):
         """Set fan speed"""
-        print(self.__execute_nv_setting("-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=1 -a [fan:"+str(self.idx)+ "]/GPUTargetFanSpeed="+str(speed)))
+        cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + "-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=1 -a [fan:"+str(self.idx)+ "]/GPUTargetFanSpeed="+str(speed))
+        print(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip())
 
     def stop(self, signum, frame):
         """Restoring GPU state on close or interupt"""
         print("Stopping...")
         for a in self:
             print("Restoring GPU#"+str(self.idx)+"...")
-            print(self.__execute_nv_setting("-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=0"))
+            cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + "-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=0")
+            print(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip())
         raise StopIteration("The end.")
 
     fan_speed = property(_get_fan_speed, _set_fan_speed)
