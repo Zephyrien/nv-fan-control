@@ -10,11 +10,11 @@ from os import environ
 EXECUTABLE='nvidia-settings'
 # set default values
 # temperature the GPU should have
-TARGET_TEMP=65
+TARGET_TEMP=55
 # how much may the temperature vary from target (tolerance)
 TEMP_TOL=2
 # interval for checking temperature in sec
-INTERVAL=2
+INTERVAL=4
 # speed adjustment interval
 ADJ_RATE=2
 # minimum speed
@@ -55,35 +55,31 @@ class NvidiaGpus():
         speed=self._get_fan_speed()
         if speed > SPEED_MIN: self._set_fan_speed(speed - adj)
         return(self)
-		
-    def __toint(self,value):
-        try:
-            return(int(value))
-        except ValueError:
-            return(0)
-			
+
+    def __execute_nv_setting(self,arg):
+        """Launch nvidia-settings"""
+        return check_output(str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + " " + arg),stderr=STDOUT,universal_newlines=True).strip()
+
     def _temp(self):
         """Return GPU temperature"""
-        cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + " -t -q [GPU:"+str(self.idx)+ "]/GPUCoreTemp")       
-        return(self.__toint(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip()))
+        tempe=self.__execute_nv_setting("-t -q [GPU:"+str(self.idx)+ "]/GPUCoreTemp")
+        return(int(tempe))
 
     def _get_fan_speed(self):
         """Get fan speed"""
-        cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + "-t -q [fan:"+str(self.idx)+ "]/GPUCurrentFanSpeed")        
-        return(self.__toint(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip()))
+        speed=self.__execute_nv_setting("-t -q [fan:"+str(self.idx)+ "]/GPUCurrentFanSpeed")
+        return(int(speed))
 
     def _set_fan_speed(self,speed):
         """Set fan speed"""
-        cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + "-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=1 -a [fan:"+str(self.idx)+ "]/GPUTargetFanSpeed="+str(speed))
-        print(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip())
+        print(self.__execute_nv_setting("-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=1 -a [fan:"+str(self.idx)+ "]/GPUTargetFanSpeed="+str(speed)))
 
     def stop(self, signum, frame):
         """Restoring GPU state on close or interupt"""
         print("Stopping...")
         for a in self:
             print("Restoring GPU#"+str(self.idx)+"...")
-            cmd=str.split(EXECUTABLE + " -c " + self.env['DISPLAY'] + "-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=0")
-            print(check_output(cmd,stderr=STDOUT,universal_newlines=True).strip())
+            print(self.__execute_nv_setting("-a [gpu:"+str(self.idx)+ "]/GPUFanControlState=0"))
         raise StopIteration("The end.")
 
     fan_speed = property(_get_fan_speed, _set_fan_speed)
@@ -99,9 +95,12 @@ def main():
         signal(SIGTERM, nv_gpus.stop)
         while 1:
             for gpu in nv_gpus:
-                if gpu.temp > TARGET_TEMP + TEMP_TOL:
+                temp=gpu.temp
+                print("GPU"+str(gpu.idx)+" temperature: "+str(temp))
+                print("GPU"+str(gpu.idx)+" fan speed: "+str(gpu.fan_speed))
+                if temp > TARGET_TEMP + TEMP_TOL:
                     gpu+=ADJ_RATE
-                elif gpu.temp < TARGET_TEMP - TEMP_TOL:
+                elif temp < TARGET_TEMP - TEMP_TOL:
                     gpu-=ADJ_RATE
             sleep(INTERVAL)
     except OSError as err:
