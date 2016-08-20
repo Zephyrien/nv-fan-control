@@ -6,6 +6,7 @@ from time import sleep
 from subprocess import check_output,CalledProcessError,STDOUT
 from signal import signal, SIGINT, SIGTERM
 from os import environ
+import threading
 
 EXECUTABLE='nvidia-settings'
 # set default values
