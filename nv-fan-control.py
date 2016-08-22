@@ -99,7 +99,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
         """Get fan speed"""        
         cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-t" , "-q", "[fan:"+str(self.gpuID)+ "]/GPUCurrentFanSpeed"]
         self.speed=self._execute(cmd)      
-        logging.debug("Measured fan speed: " + str(self.speed))
+        logging.debug("Measured fan speed: " + str(self.speed))        
         return(self.speed)
 
     def _set_fan_speed(self,speed):
@@ -118,7 +118,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
             
     def _adjust_by_curve(self):        
         # Old value                
-        newspeed=self.gettargetspeed(self.temp)             
+        newspeed=self.gettargetspeed(self._get_temp())             
         logging.debug("Temperature: {}, fanspeed (previous): {}%".format(self.temp,self.speed))        
         logging.debug("Calculated new speed: " + str(newspeed))
         speed=self._get_fan_speed()
@@ -135,9 +135,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
             self._adjust_by_curve()            
             # Free lock to release next thread
             threadLock.release()
-            sleep(INTERVAL)        
-
-    fan_speed = property(_get_fan_speed, _set_fan_speed)
+            sleep(INTERVAL)           
 
 class GPUs():
     threads = []
