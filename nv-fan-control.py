@@ -104,8 +104,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
 
     def _set_fan_speed(self,speed):
         """Set fan speed"""                
-        cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-a" , "[gpu:"+str(self.gpuID)+ "]/GPUFanControlState=1", "-a", "[fan:"+str(self.gpuID)+ "]/GPUTargetFanSpeed="+str(speed)]
-        #run(cmd,stdout=DEVNULL,stderr=universal_newlines=True)        
+        cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-a" , "[gpu:"+str(self.gpuID)+ "]/GPUFanControlState=1", "-a", "[fan:"+str(self.gpuID)+ "]/GPUTargetFanSpeed="+str(speed)]        
         run(cmd,stdout=DEVNULL,universal_newlines=True)
         self.speed=speed
         
@@ -130,11 +129,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
             # Get lock to synchronize threads
             threadLock.acquire()
             #self._adjust_by_target()   
-            try:
-                self._adjust_by_curve()
-            except CalledProcessError as e:
-                # application error
-                print("Could not execute '{}': {}".format(EXECUTABLE, NameError(e.output)))                            
+            self._adjust_by_curve()            
             # Free lock to release next thread
             threadLock.release()
             sleep(INTERVAL)        
@@ -153,10 +148,7 @@ class GPUs():
     def stop(self, signum, frame):
         for t in self.threads:            
             t.stop()
-        #try:
-            #threadLock.release()
-        #finally:
-            #pass
+
     def run(self):
        print("Starting...")         
        for t in self.threads:
