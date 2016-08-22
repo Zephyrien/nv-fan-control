@@ -13,20 +13,12 @@ import logging
 EXECUTABLE='nvidia-settings'
 # set default values
 # temperature the GPU should have
-TARGET_TEMP=60
-# how much may the temperature vary from target (tolerance)
-TEMP_TOL=2
+TOL=2
 # interval for checking temperature in sec
 INTERVAL=4
-# speed adjustment interval
-ADJ_RATE=2
-# minimum speed
-SPEED_MIN=40
-# maximum speed
-SPEED_MAX=90
 
 curve = {40: 40,
-        50: 40,
+        50: 43,
         60: 50,
         65: 65,
         70: 95,
@@ -119,9 +111,9 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
     def _adjust_by_target(self):
         self.temp=self._temp()
         self.speed=self._get_fan_speed()
-        if self.temp > TARGET_TEMP + TEMP_TOL:
+        if self.temp > TARGET_TEMP + TOL:
             if self.speed < SPEED_MAX: self._set_fan_speed(self.speed + ADJ_RATE)                    
-        elif self.temp < TARGET_TEMP - TEMP_TOL:
+        elif self.temp < TARGET_TEMP - TOL:
             if self.speed > SPEED_MIN: self._set_fan_speed(self.speed - ADJ_RATE)
             
     def _adjust_by_curve(self):        
@@ -131,7 +123,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
         logging.debug("Calculated new speed: " + str(newspeed))
         speed=self._get_fan_speed()
         # if variation < 2°C        
-        if abs(speed - newspeed) > TEMP_TOL:                                        
+        if abs(speed - newspeed) > TOL:                                        
             logging.info('Changing speed from {}% to {}% for GPU#{}'.format(self.speed,newspeed,self.gpuID))
             self._set_fan_speed(newspeed)        
         
