@@ -6,24 +6,18 @@ from time import sleep
 from subprocess import check_output,CalledProcessError,STDOUT,DEVNULL, PIPE, Popen
 #import subprocess
 from signal import signal, SIGINT, SIGTERM
-from os import environ
+from os import environ,path
 import threading
 import logging
+import configparser
+from xdg.BaseDirectory import xdg_config_home
+import ast
 
 EXECUTABLE='nvidia-settings'
+conf_file='nv-fan-control/nvfan.conf'
 # set default values
 # temperature the GPU should have
-TOL=2
-# interval for checking temperature in sec
-INTERVAL=4
 
-curve = {40: 40,
-        50: 43,
-        60: 50,
-        65: 65,
-        70: 95,
-        80: 99,
-        100: 100}
         
 class TemperatureCurve():
         extended=[]
@@ -59,13 +53,30 @@ class StoppableThread(threading.Thread):
     def stopped(self):
         return self._stopper.is_set()
 
-class NvidiaGpus(StoppableThread,TemperatureCurve):       
-    def __init__(self,gpuID):
+class FanRegul(StoppableThread,TemperatureCurve):       
+    def __init__(self,gpuID, conf):
         #super(self.__class__, self).__init__(self)        
-        StoppableThread.__init__(self, name="GPU#" + str(gpuID))
-        TemperatureCurve.__init__(self,curve)
-        self.gpuID = gpuID        
-        self.env=environ        
+        StoppableThread.__init__(self, name="GPU#" + str(gpuID))        
+        self.gpuID = gpuID   
+        #Tolerance = 2
+        #Interval = 4
+        self.INTERVAL=conf.getint('Interval',4)
+        self.TOL=conf.getint('Tolerance',2)        
+        try:            
+            Curve=ast.literal_eval(conf.get("Curve"))
+            logging.debug("Using curve from config file: {}".format(Curve))
+        except ValueError:            
+            Curve={40: 40,
+                    50: 43,
+                    60: 50,
+                    65: 65,
+                    70: 95,
+                    80: 99,
+                    100: 100}
+            logging.debug("Using default curve: {}".format(Curve))
+        TemperatureCurve.__init__(self,Curve)
+        
+        self.env=environ   
         if environ.get('DISPLAY')==None: self.env['DISPLAY']=':0'   
         self.temp=self._get_temp()
         self.speed=self._get_fan_speed()        
@@ -107,14 +118,6 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
         cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-a" , "[gpu:"+str(self.gpuID)+ "]/GPUFanControlState=1", "-a", "[fan:"+str(self.gpuID)+ "]/GPUTargetFanSpeed="+str(speed)]        
         self._execute(cmd)
         self.speed=speed
-        
-    def _adjust_by_target(self):
-        self.temp=self._temp()
-        self.speed=self._get_fan_speed()
-        if self.temp > TARGET_TEMP + TOL:
-            if self.speed < SPEED_MAX: self._set_fan_speed(self.speed + ADJ_RATE)                    
-        elif self.temp < TARGET_TEMP - TOL:
-            if self.speed > SPEED_MIN: self._set_fan_speed(self.speed - ADJ_RATE)
             
     def _adjust_by_curve(self):        
         # Old value                
@@ -123,7 +126,7 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
         logging.debug("Calculated new speed: " + str(newspeed))
         speed=self._get_fan_speed()
         # if variation < 2°C        
-        if abs(speed - newspeed) > TOL:                                        
+        if abs(speed - newspeed) > self.TOL:                                        
             logging.info('Changing speed from {}% to {}% for GPU#{}'.format(self.speed,newspeed,self.gpuID))
             self._set_fan_speed(newspeed)        
         
@@ -135,13 +138,25 @@ class NvidiaGpus(StoppableThread,TemperatureCurve):
             self._adjust_by_curve()            
             # Free lock to release next thread
             threadLock.release()
-            sleep(INTERVAL)           
+            sleep(self.INTERVAL)           
 
 class GPUs():
     threads = []
-    def __init__(self,count):        
-        for i in range (0, count):                                    
-            gpu=NvidiaGpus(i)
+    
+    def __init__(self):        
+        Config = configparser.ConfigParser()
+        Config.read(path.join(xdg_config_home, conf_file))        
+        globalconf = Config["Global"]
+        gpu_count=globalconf.getint("nbGPU",1)
+        print(globalconf.getboolean("Debug", False))
+        if globalconf.getboolean("Debug", False): 
+            logging.basicConfig(level=logging.DEBUG, format='%(threadName)s : %(message)s')
+        else:
+            logging.basicConfig(level=logging.INFO, format='%(threadName)s : %(message)s')
+        logging.debug("Found {} GPU in conf".format(gpu_count))
+        for i in range (0, gpu_count):                                    
+            gpuconf=Config["GPU#"+str(i)]            
+            gpu=FanRegul(i,gpuconf)
             self.threads.append(gpu)        
     def _startall(self):        
         for t in self.threads:
@@ -157,9 +172,9 @@ class GPUs():
             t.join()
 
 def main():
-    logging.basicConfig(level=logging.INFO, format='%(threadName)s : %(message)s')
+    
     try:                     
-        nv_gpus=GPUs(1)
+        nv_gpus=GPUs()
         # Trap ^C
         signal(SIGINT, nv_gpus.stop)
         # Trap SIGTERM
