@@ -1,99 +1,96 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
-from sys import exit,stderr
+from sys import exit
 from time import sleep
-from subprocess import check_output,CalledProcessError,STDOUT,DEVNULL, PIPE, Popen
-#import subprocess
-from signal import signal, SIGINT, SIGTERM
+from subprocess import PIPE, Popen
+from ast import literal_eval
+from signal import signal, SIGINT, SIGTERM, SIGHUP
 from os import environ,path
-import threading
-import logging
-import configparser
+from threading import Thread, Lock, Event
+from configparser import
 from xdg.BaseDirectory import xdg_config_home
-import ast
+from logging import debug,info,DEBUG,INFO,basicConfig
+
 
 EXECUTABLE='nvidia-settings'
 conf_file='nv-fan-control/nvfan.conf'
 # set default values
 # temperature the GPU should have
-
-        
-class TemperatureCurve():
-        extended=[]
-        def __init__(self, curve):                        
-            # Calculating extended curve with tolerance
-            sortedcurve=sorted(curve.items())
-            for k, v in enumerate(sortedcurve):
-                try:
-                    X_1=sortedcurve[k]
-                    X_2=sortedcurve[k+1]
-                    for i in range(X_1[0],X_2[0]):                                             
-                        self.extended.append((i, int((i-X_1[0])/(X_2[0]-X_1[0])*(X_2[1]-X_1[1])+X_1[1])))
-                except IndexError:            
-                    pass
-
-        def gettargetspeed(self, temp):            
-            for k,v in self.extended:
-                if temp<=k: return v
-            return(extended)
-
-
-class StoppableThread(threading.Thread):
-    """Thread class with a stop() method. The thread itself has to check
-    regularly for the stopped() condition."""
-
-    def __init__(self,name):
-        super(StoppableThread, self).__init__(name=name)
-        self._stopper = threading.Event()
-
-    def stopit(self):       
-        self._stopper.set()
-
-    def stopped(self):
-        return self._stopper.is_set()
-
-class FanRegul(StoppableThread,TemperatureCurve):       
-    def __init__(self,gpuID, conf):
-        #super(self.__class__, self).__init__(self)        
-        StoppableThread.__init__(self, name="GPU#" + str(gpuID))        
-        self.gpuID = gpuID   
-        #Tolerance = 2
-        #Interval = 4
-        self.INTERVAL=conf.getint('Interval',4)
-        self.TOL=conf.getint('Tolerance',2)        
-        try:            
-            Curve=ast.literal_eval(conf.get("Curve"))
-            logging.debug("Using curve from config file: {}".format(Curve))
-        except ValueError:            
-            Curve={40: 40,
+default_curve={40: 40,
                     50: 43,
                     60: 50,
                     65: 65,
                     70: 95,
                     80: 99,
                     100: 100}
-            logging.debug("Using default curve: {}".format(Curve))
-        TemperatureCurve.__init__(self,Curve)
-        
+                    
+class TemperatureCurve():
+    """Class tu load and interpolate temperature curve
+    """
+    extended=[]
+    def __init__(self, curve):                        
+        # Calculating extended curve with tolerance
+        self.curve=curve
+    def gettargetspeed(self,x):
+        try:
+            return(self.curve[x])            
+        except KeyError:
+            x1=sorted(curve.keys())
+            y1=sorted(curve.values())
+            for k,v in enumerate(x1):
+                if x >= x1[k] and x < x1[k+1]:
+                    return(int(round((x-x1[k])/(x1[k+1]-x1[k])*(y1[k+1]-y1[k])+y1[k])))            
+    
+
+class StoppableThread(Thread):
+    """Thread class with a stop() method. The thread itself has to check
+    regularly for the stopped() condition."""
+    def __init__(self,name):
+        super(StoppableThread, self).__init__(name=name)
+        self._stopper = Event()
+    def stopit(self):       
+        self._stopper.set()
+    def stopped(self):
+        return self._stopper.is_set()
+
+class FanRegul(StoppableThread,TemperatureCurve):
+    """Class to regulate temperature of one GPU
+    """
+    def __init__(self,gpuID, conf):
+        name = "GPU#{}".format(gpuID)
+        StoppableThread.__init__(self, name=name)        
+        self.gpuID = gpuID           
+        # Getting interval from conf (default=4)
+        self.INTERVAL=getinterval(name)
+        # Getting tolerance from conf (default=4)
+        self.TOL=conf.gettol(name)
+        # Getting curve from conf       
+        TemperatureCurve.__init__(self,conf.getcurve(name))
+        # getting DISPLAY environment variable
         self.env=environ   
-        if environ.get('DISPLAY')==None: self.env['DISPLAY']=':0'   
+        if environ.get('DISPLAY')==None: self.env['DISPLAY']=':0'
+        # getting initial temp and fan speed
         self.temp=self._get_temp()
         self.speed=self._get_fan_speed()        
 
-    def stop(self):        
-        print("Stopping... Resetting autofan mode for GPU#"+str(self.gpuID))        
-        cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-a" , "[GPU:"+str(self.gpuID)+ "]/GPUFanControlState=0"]
+    def stop(self):     
+    """Stop and reset GPU configuration"""
+        info("Stopping... Resetting autofan mode for GPU#{}".format(self.gpuID))        
+        cmd=["-a" , "[GPU:{}]/GPUFanControlState=0".format(self.gpuID)]
         self._execute(cmd)
         self.stopit()
         
-    def _execute(self, cmd):    
+    def _execute(self, arg):
+    """ Run well formed command"""
+        cmd=[EXECUTABLE, "-c", self.env['DISPLAY']
+        cmd.extend(arg)
         process = Popen(cmd,stdout=PIPE,stderr=PIPE,universal_newlines=True)
         process.wait()
         out, err = process.communicate()
-        logging.debug("STDOUT of {}: {}".format(EXECUTABLE,out))
-        logging.debug("STDERR of {}: {}".format(EXECUTABLE,err))        
-        logging.debug("Argument of {}: {}".format(EXECUTABLE,cmd))
+        debug("STDOUT of {}: {}".format(EXECUTABLE,out))
+        debug("STDERR of {}: {}".format(EXECUTABLE,err))        
+        debug("Argument of {}: {}".format(EXECUTABLE,cmd))
         try:            
             return(int(out))
         except (ValueError, TypeError):
@@ -101,91 +98,122 @@ class FanRegul(StoppableThread,TemperatureCurve):
 
     def _get_temp(self):
         """Return GPU temperature"""        
-        cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-t" , "-q", "[GPU:"+str(self.gpuID)+ "]/GPUCoreTemp"]        
+        cmd=["-t" , "-q", "[GPU:{}]/GPUCoreTemp".format(self.gpuID)]        
         self.temp=self._execute(cmd)
-        logging.debug("Measured temperature: " + str(self.temp))
+        debug("Measured temperature: " + str(self.temp))
         return(self.temp)
 
     def _get_fan_speed(self):
         """Get fan speed"""        
-        cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-t" , "-q", "[fan:"+str(self.gpuID)+ "]/GPUCurrentFanSpeed"]
+        cmd=["-t" , "-q", "[fan:{}]/GPUCurrentFanSpeed".format(self.gpuID)]
         self.speed=self._execute(cmd)      
-        logging.debug("Measured fan speed: " + str(self.speed))        
+        debug("Measured fan speed: " + str(self.speed))        
         return(self.speed)
 
     def _set_fan_speed(self,speed):
         """Set fan speed"""                
-        cmd=[EXECUTABLE, "-c", self.env['DISPLAY'], "-a" , "[gpu:"+str(self.gpuID)+ "]/GPUFanControlState=1", "-a", "[fan:"+str(self.gpuID)+ "]/GPUTargetFanSpeed="+str(speed)]        
+        cmd=["-a" , "[gpu:{}]/GPUFanControlState=1", "-a", "[fan:{}]/GPUTargetFanSpeed={}".format(self.gpuID,self.gpuID,speed)]        
         self._execute(cmd)
         self.speed=speed
             
-    def _adjust_by_curve(self):        
-        # Old value                
+    def _adjust(self):
+    """ Adjust fan speed from temperature indication"""
         newspeed=self.gettargetspeed(self._get_temp())             
-        logging.debug("Temperature: {}, fanspeed (previous): {}%".format(self.temp,self.speed))        
-        logging.debug("Calculated new speed: " + str(newspeed))
+        debug("Temperature: {}, fanspeed (previous): {}%".format(self.temp,self.speed))        
+        debug("Calculated new speed: {}%".format(newspeed))
         speed=self._get_fan_speed()
         # if variation < 2°C        
         if abs(speed - newspeed) > self.TOL:                                        
-            logging.info('Changing speed from {}% to {}% for GPU#{}'.format(self.speed,newspeed,self.gpuID))
+            info('Changing speed from {}% to {}% for GPU#{}'.format(self.speed,newspeed,self.gpuID))
             self._set_fan_speed(newspeed)        
         
-    def run(self):                
+    def run(self):
+    """Entry of thread"""
         while not(self.stopped()):
             # Get lock to synchronize threads
-            threadLock.acquire()
-            #self._adjust_by_target()   
-            self._adjust_by_curve()            
+            threadLock.acquire()            
+            self._adjust()            
             # Free lock to release next thread
             threadLock.release()
             sleep(self.INTERVAL)           
 
-class GPUs():
-    threads = []
-    
-    def __init__(self):        
-        Config = configparser.ConfigParser()
-        Config.read(path.join(xdg_config_home, conf_file))        
-        globalconf = Config["Global"]
-        gpu_count=globalconf.getint("nbGPU",1)
-        print(globalconf.getboolean("Debug", False))
+class NVConfig(ConfigParser):
+    """Class to read and apply configuration
+    """
+    def __init__(self)        
+        self.read(path.join(xdg_config_home, conf_file))        
+        globalconf = self["Global"]
+        self._gpu_count=globalconf.getint("nbGPU",1)    
         if globalconf.getboolean("Debug", False): 
-            logging.basicConfig(level=logging.DEBUG, format='%(threadName)s : %(message)s')
+            basicConfig(level=DEBUG, format='%(threadName)s : %(message)s')
         else:
-            logging.basicConfig(level=logging.INFO, format='%(threadName)s : %(message)s')
-        logging.debug("Found {} GPU in conf".format(gpu_count))
+            basicConfig(level=INFO, format='%(threadName)s : %(message)s')
+        debug("Found {} GPU in conf".format(self._gpu_count))                               
+    def _get_gpu_count(self):        
+    """ Getting count of GPU from conf (default=1)"""
+        return(self._gpu_count)
+    def getinterval(self,name)
+    """ Getting interval from conf (default=4)"""
+        gpuconf=self["GPU#"+str(i)]         
+        return gpuconf.getint('Interval',4)        
+        # Getting curve from conf
+    def gettol(self,name)
+    """Get tolerance from configuration"""
+        gpuconf=self["GPU#"+str(i)]        
+        return gpuconf.getint('Tolerance',2)
+    def getcurve(self,name)
+        """Get curve from configuration"""
+        gpuconf=self["GPU#"+str(i)]
+        try:            
+            Curve=literal_eval(gpuconf.get("Curve"))
+            debug("Using curve from config file: {}".format(Curve))
+        except ValueError:            
+            Curve=default_curve
+            debug("Using default curve: {}".format(Curve))
+        return Curve
+            
+class GPUs(NVConfig):
+    """Class to initialise GPUs and configuration
+    also main class hold all thread for each GPU
+    """
+    threads = []    
+    def __init__(self):        
+        NVConfig.__init__(self)
         for i in range (0, gpu_count):                                    
             gpuconf=Config["GPU#"+str(i)]            
             gpu=FanRegul(i,gpuconf)
-            self.threads.append(gpu)        
-    def _startall(self):        
-        for t in self.threads:
-            t.start()        
+            self.threads.append(gpu)      
     def stop(self, signum, frame):
+    """When receive interrupt SIGNINT or SIGTERM
+    stopping"""
         for t in self.threads:            
             t.stop()
+    def reload():
+    """When receive interrupt SIGHUP
+    reloading configuration"""
+        info("Reloading")
     def run(self):
-       print("Starting...")         
+    """Start and wait for threads"""
+       info("Starting...")         
        for t in self.threads:
             t.start()  
        for t in self.threads:
             t.join()
 
-def main():
-    
+def main():    
     try:                     
         nv_gpus=GPUs()
         # Trap ^C
         signal(SIGINT, nv_gpus.stop)
         # Trap SIGTERM
         signal(SIGTERM, nv_gpus.stop)        
+        signal(SIGHUP, nv_gpus.reload)
         nv_gpus.run()       
     except OSError as err:
-        # executable not found on system  
-        
+        # executable not found on system          
         return("'" + EXECUTABLE + "' " + "was not found")
 
-threadLock = threading.Lock()
+threadLock = Lock()
 
 if __name__ == "__main__":
         exit(main())
