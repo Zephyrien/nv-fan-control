@@ -8,7 +8,7 @@ from ast import literal_eval
 from signal import signal, SIGINT, SIGTERM, SIGHUP
 from os import environ,path
 from threading import Thread, Lock, Event
-from configparser import
+from configparser import ConfigParser
 from xdg.BaseDirectory import xdg_config_home
 from logging import debug,info,DEBUG,INFO,basicConfig
 
@@ -36,8 +36,8 @@ class TemperatureCurve():
         try:
             return(self.curve[x])            
         except KeyError:
-            x1=sorted(curve.keys())
-            y1=sorted(curve.values())
+            x1=sorted(self.curve.keys())
+            y1=sorted(self.curve.values())
             for k,v in enumerate(x1):
                 if x >= x1[k] and x < x1[k+1]:
                     return(int(round((x-x1[k])/(x1[k+1]-x1[k])*(y1[k+1]-y1[k])+y1[k])))            
@@ -59,10 +59,10 @@ class FanRegul(StoppableThread,TemperatureCurve):
     """
     def __init__(self,gpuID, conf):
         name = "GPU#{}".format(gpuID)
-        StoppableThread.__init__(self, name=name)        
+        StoppableThread.__init__(self, name=name)  
         self.gpuID = gpuID           
         # Getting interval from conf (default=4)
-        self.INTERVAL=getinterval(name)
+        self.INTERVAL=conf.getinterval(name)
         # Getting tolerance from conf (default=4)
         self.TOL=conf.gettol(name)
         # Getting curve from conf       
@@ -75,15 +75,17 @@ class FanRegul(StoppableThread,TemperatureCurve):
         self.speed=self._get_fan_speed()        
 
     def stop(self):     
-    """Stop and reset GPU configuration"""
+        """Stop and reset GPU configuration
+        """
         info("Stopping... Resetting autofan mode for GPU#{}".format(self.gpuID))        
         cmd=["-a" , "[GPU:{}]/GPUFanControlState=0".format(self.gpuID)]
         self._execute(cmd)
         self.stopit()
         
     def _execute(self, arg):
-    """ Run well formed command"""
-        cmd=[EXECUTABLE, "-c", self.env['DISPLAY']
+        """ Run well formed command
+        """
+        cmd = [EXECUTABLE, "-c", self.env['DISPLAY']]        
         cmd.extend(arg)
         process = Popen(cmd,stdout=PIPE,stderr=PIPE,universal_newlines=True)
         process.wait()
@@ -117,7 +119,8 @@ class FanRegul(StoppableThread,TemperatureCurve):
         self.speed=speed
             
     def _adjust(self):
-    """ Adjust fan speed from temperature indication"""
+        """ Adjust fan speed from temperature indication
+        """
         newspeed=self.gettargetspeed(self._get_temp())             
         debug("Temperature: {}, fanspeed (previous): {}%".format(self.temp,self.speed))        
         debug("Calculated new speed: {}%".format(newspeed))
@@ -128,19 +131,20 @@ class FanRegul(StoppableThread,TemperatureCurve):
             self._set_fan_speed(newspeed)        
         
     def run(self):
-    """Entry of thread"""
+        """Entry of thread"""
         while not(self.stopped()):
             # Get lock to synchronize threads
             threadLock.acquire()            
             self._adjust()            
             # Free lock to release next thread
             threadLock.release()
-            sleep(self.INTERVAL)           
+            sleep(self.INTERVAL)
 
 class NVConfig(ConfigParser):
     """Class to read and apply configuration
-    """
-    def __init__(self)        
+    """    
+    def __init__(self):  
+        ConfigParser.__init__(self)
         self.read(path.join(xdg_config_home, conf_file))        
         globalconf = self["Global"]
         self._gpu_count=globalconf.getint("nbGPU",1)    
@@ -150,20 +154,20 @@ class NVConfig(ConfigParser):
             basicConfig(level=INFO, format='%(threadName)s : %(message)s')
         debug("Found {} GPU in conf".format(self._gpu_count))                               
     def _get_gpu_count(self):        
-    """ Getting count of GPU from conf (default=1)"""
+        """ Getting count of GPU from conf (default=1)"""
         return(self._gpu_count)
-    def getinterval(self,name)
-    """ Getting interval from conf (default=4)"""
-        gpuconf=self["GPU#"+str(i)]         
+    def getinterval(self,name):
+        """ Getting interval from conf (default=4)"""
+        gpuconf=self[name]         
         return gpuconf.getint('Interval',4)        
         # Getting curve from conf
-    def gettol(self,name)
-    """Get tolerance from configuration"""
-        gpuconf=self["GPU#"+str(i)]        
+    def gettol(self,name):
+        """Get tolerance from configuration"""
+        gpuconf=self[name]
         return gpuconf.getint('Tolerance',2)
-    def getcurve(self,name)
+    def getcurve(self,name):
         """Get curve from configuration"""
-        gpuconf=self["GPU#"+str(i)]
+        gpuconf=self[name]
         try:            
             Curve=literal_eval(gpuconf.get("Curve"))
             debug("Using curve from config file: {}".format(Curve))
@@ -171,6 +175,7 @@ class NVConfig(ConfigParser):
             Curve=default_curve
             debug("Using default curve: {}".format(Curve))
         return Curve
+    count = property(_get_gpu_count)
             
 class GPUs(NVConfig):
     """Class to initialise GPUs and configuration
@@ -178,26 +183,25 @@ class GPUs(NVConfig):
     """
     threads = []    
     def __init__(self):        
-        NVConfig.__init__(self)
-        for i in range (0, gpu_count):                                    
-            gpuconf=Config["GPU#"+str(i)]            
-            gpu=FanRegul(i,gpuconf)
+        NVConfig.__init__(self)        
+        for i in range (0, self.count):            
+            gpu=FanRegul(i,self)
             self.threads.append(gpu)      
     def stop(self, signum, frame):
-    """When receive interrupt SIGNINT or SIGTERM
-    stopping"""
+        """When receive interrupt SIGNINT or SIGTERM
+        stopping"""
         for t in self.threads:            
             t.stop()
     def reload():
-    """When receive interrupt SIGHUP
-    reloading configuration"""
+        """When receive interrupt SIGHUP
+        reloading configuration"""
         info("Reloading")
     def run(self):
-    """Start and wait for threads"""
-       info("Starting...")         
-       for t in self.threads:
+        """Start and wait for threads"""
+        info("Starting...")         
+        for t in self.threads:
             t.start()  
-       for t in self.threads:
+        for t in self.threads:
             t.join()
 
 def main():    
