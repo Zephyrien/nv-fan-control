@@ -32,12 +32,13 @@ class TemperatureCurve():
     def __init__(self, curve):                        
         # Calculating extended curve with tolerance
         self.curve=curve
-    def gettargetspeed(self,x):
-        try:
+    def gettargetspeed(self,x):        
+        if x <= min(self.curve): return self.curve[min(self.curve)]
+        try:            
             return(self.curve[x])            
         except KeyError:
             x1=sorted(self.curve.keys())
-            y1=sorted(self.curve.values())
+            y1=sorted(self.curve.values())    
             for k,v in enumerate(x1):
                 if x >= x1[k] and x < x1[k+1]:
                     return(int(round((x-x1[k])/(x1[k+1]-x1[k])*(y1[k+1]-y1[k])+y1[k])))            
@@ -120,12 +121,12 @@ class FanRegul(StoppableThread,TemperatureCurve):
             
     def _adjust(self):
         """ Adjust fan speed from temperature indication
-        """
+        """        
         newspeed=self.gettargetspeed(self._get_temp())             
         debug("Temperature: {}, fanspeed (previous): {}%".format(self.temp,self.speed))        
         debug("Calculated new speed: {}%".format(newspeed))
         speed=self._get_fan_speed()
-        # if variation < 2°C        
+        # if variation < 2°C           
         if abs(speed - newspeed) > self.TOL:                                        
             info('Changing speed from {}% to {}% for GPU#{}'.format(self.speed,newspeed,self.gpuID))
             self._set_fan_speed(newspeed)        
@@ -163,8 +164,9 @@ class NVConfig(ConfigParser):
         # Getting curve from conf
     def gettol(self,name):
         """Get tolerance from configuration"""
-        gpuconf=self[name]
+        gpuconf=self[name]        
         return gpuconf.getint('Tolerance',2)
+    
     def getcurve(self,name):
         """Get curve from configuration"""
         gpuconf=self[name]
